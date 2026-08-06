@@ -1,0 +1,3 @@
+import { Order, Payment, Shift } from '../models/BusinessModels.js'
+export async function activeShift(cashier){return Shift.findOne({cashier,status:'Open'})}
+export async function calculateShift(shift){const start=shift.shiftStartTime,end=shift.shiftEndTime||new Date();const window={ $gte:start,$lte:end };const [orders,payments]=await Promise.all([Order.countDocuments({createdBy:shift.cashier,bookingDate:window,status:{$ne:'Cancelled'}}),Payment.aggregate([{$match:{receivedBy:shift.cashier,date:window,isVoided:false,paymentMethod:'Cash'}},{$group:{_id:null,total:{$sum:'$amount'}}}])]);const systemCashCollection=payments[0]?.total||0;return {totalOrders:orders,totalPayments:systemCashCollection,systemCashCollection,expectedCash:shift.openingCash+systemCashCollection}}
