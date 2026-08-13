@@ -43,7 +43,16 @@ export async function scheduleShift(req, res, next) {
     if (!Number.isInteger(num(shiftNumber)) || num(shiftNumber) < 1) return fail(res, 'A valid Shift Number is required.')
     if (!startTime || !endTime) return fail(res, 'Start Time and End Time are required.')
     const start = new Date(startTime), end = new Date(endTime)
-    if (!(start < end)) return fail(res, 'End Time must be after Start Time.')
+    // Validate that these actually parsed into real instants before comparing
+    // them — a Date built from an unparsable string (e.g. a bare "09:00 AM"
+    // with no date) becomes Invalid Date, and Invalid Date < Invalid Date is
+    // always false, which used to fall straight into the "End Time must be
+    // after Start Time" message even though the real problem was invalid
+    // input. Reporting that separately avoids the misleading error.
+    if (Number.isNaN(start.getTime())) return fail(res, 'Start Time is not a valid date/time.')
+    if (Number.isNaN(end.getTime())) return fail(res, 'End Time is not a valid date/time.')
+    // Compare the actual millisecond instants, not the Date objects/strings.
+    if (end.getTime() <= start.getTime()) return fail(res, 'End Time must be after Start Time.')
     const cashierUser = await User.findOne({ _id: cashier, role: 'CASHIER', isActive: true })
     if (!cashierUser) return fail(res, 'Selected user is not an active cashier.')
     if (await overlappingSchedule(cashier, start, end)) return fail(res, 'This cashier already has an overlapping shift scheduled.')
@@ -63,7 +72,9 @@ export async function updateSchedule(req, res, next) {
     const { shiftNumber, startTime, endTime, notes } = req.body
     const start = startTime ? new Date(startTime) : shift.scheduledStartTime
     const end = endTime ? new Date(endTime) : shift.scheduledEndTime
-    if (!(start < end)) return fail(res, 'End Time must be after Start Time.')
+    if (Number.isNaN(start?.getTime?.())) return fail(res, 'Start Time is not a valid date/time.')
+    if (Number.isNaN(end?.getTime?.())) return fail(res, 'End Time is not a valid date/time.')
+    if (end.getTime() <= start.getTime()) return fail(res, 'End Time must be after Start Time.')
     if (await overlappingSchedule(shift.cashier, start, end, shift._id)) return fail(res, 'This cashier already has an overlapping shift scheduled.')
     if (shiftNumber) shift.shiftNumber = num(shiftNumber)
     shift.scheduledStartTime = start; shift.scheduledEndTime = end; shift.scheduledDate = start

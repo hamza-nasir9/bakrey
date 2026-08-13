@@ -5,8 +5,21 @@ import './shifts.css'
 
 const money = n => new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', maximumFractionDigits: 0 }).format(n || 0)
 const fmt = d => d ? new Date(d).toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' }) : '—'
-// value usable in <input type="datetime-local">
-const localInput = d => { const x = d ? new Date(d) : new Date(); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 16) }
+// Separate, unambiguous Date ("YYYY-MM-DD") and Time ("HH:mm") input values —
+// both natively guaranteed formats, unlike a combined datetime-local value
+// which can degrade to free text (e.g. "09:00 AM") on some browsers/inputs
+// and silently fail to parse. We build the actual Date from these numeric
+// components ourselves instead of trusting new Date(combinedString).
+const dateInput = d => { const x = d ? new Date(d) : new Date(); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}` }
+const timeInput = d => { const x = d ? new Date(d) : new Date(); return `${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}` }
+// Combines a "YYYY-MM-DD" date and "HH:mm" time into a real Date built from
+// numeric parts — never from parsing a single ambiguous string.
+const combine = (dateStr, timeStr) => {
+  const [y, m, d] = (dateStr || '').split('-').map(Number)
+  const [h, mi] = (timeStr || '').split(':').map(Number)
+  if (![y, m, d, h, mi].every(Number.isFinite)) return null
+  return new Date(y, m - 1, d, h, mi)
+}
 const statusClass = { Scheduled: 'scheduled', Open: 'open', Closed: 'closed', Cancelled: 'cancelled' }
 
 export default function Shifts({ user, logout }) {
@@ -59,8 +72,11 @@ export default function Shifts({ user, logout }) {
   }
   const saveSchedule = async e => {
     e.preventDefault()
+    const start = combine(schedule.startDate, schedule.startClock)
+    const end = combine(schedule.endDate, schedule.endClock)
+    if (!start || !end) { setError('Please provide a valid Start Date/Time and End Date/Time.'); return }
     try {
-      const payload = { cashier: schedule.cashier, shiftNumber: schedule.shiftNumber, startTime: new Date(schedule.startTime).toISOString(), endTime: new Date(schedule.endTime).toISOString(), notes: schedule.notes }
+      const payload = { cashier: schedule.cashier, shiftNumber: schedule.shiftNumber, startTime: start.toISOString(), endTime: end.toISOString(), notes: schedule.notes }
       if (schedule._id) await api.patch(`/shifts/${schedule._id}/schedule`, payload)
       else await api.post('/shifts/schedule', payload)
       setSchedule(null); load()
@@ -83,7 +99,7 @@ export default function Shifts({ user, logout }) {
       <div className="shift-title">
         <div><p>SHIFT MANAGEMENT</p><h1>{user.role === 'ADMIN' ? 'Cashier shifts' : 'My shift'}</h1><span>{user.role === 'ADMIN' ? 'Assign custom shift windows and reconcile cash collections.' : 'Your assigned shift, start/end time, and cash reconciliation.'}</span></div>
         {user.role === 'ADMIN'
-          ? <button className="shift-primary" onClick={() => setSchedule({ cashier: cashiers[0]?._id || '', shiftNumber: '1', startTime: localInput(), endTime: localInput(new Date(Date.now() + 6 * 3600000)), notes: '' })}><CalendarPlus size={16} />Schedule Shift</button>
+          ? <button className="shift-primary" onClick={() => setSchedule({ cashier: cashiers[0]?._id || '', shiftNumber: '1', startDate: dateInput(), startClock: timeInput(), endDate: dateInput(new Date(Date.now() + 6 * 3600000)), endClock: timeInput(new Date(Date.now() + 6 * 3600000)), notes: '' })}><CalendarPlus size={16} />Schedule Shift</button>
           : !current ? <button className="shift-primary" disabled={!upcoming} onClick={() => setForm({ openingCash: '0', notes: '' })}><Play size={16} />Start Shift</button> : <button className="close-shift" onClick={() => setClose({ closingCash: '', notes: '' })}><LockKeyhole size={16} />End Shift</button>}
       </div>
 
@@ -112,7 +128,7 @@ export default function Shifts({ user, logout }) {
             <td>{money(s.cashDifference)}</td>
             <td><span className={statusClass[s.status] || ''}>{s.status}</span></td>
             <td>
-              {s.status === 'Scheduled' && <><button onClick={() => setSchedule({ _id: s._id, cashier: s.cashier?._id, shiftNumber: s.shiftNumber, startTime: localInput(s.scheduledStartTime), endTime: localInput(s.scheduledEndTime), notes: s.notes || '' })}>Edit</button><button className="danger" onClick={() => cancelSchedule(s._id)}>Cancel</button></>}
+              {s.status === 'Scheduled' && <><button onClick={() => setSchedule({ _id: s._id, cashier: s.cashier?._id, shiftNumber: s.shiftNumber, startDate: dateInput(s.scheduledStartTime), startClock: timeInput(s.scheduledStartTime), endDate: dateInput(s.scheduledEndTime), endClock: timeInput(s.scheduledEndTime), notes: s.notes || '' })}>Edit</button><button className="danger" onClick={() => cancelSchedule(s._id)}>Cancel</button></>}
               {s.status === 'Closed' && <button onClick={() => reopen(s._id)}>Reopen</button>}
               {(s.status === 'Open' || s.status === 'Closed') && <button onClick={() => viewReport(s._id)}><FileText size={13} />Report</button>}
             </td>
@@ -153,8 +169,11 @@ export default function Shifts({ user, logout }) {
     {schedule && <Modal title={schedule._id ? 'Edit Scheduled Shift' : 'Schedule Shift'} close={() => setSchedule(null)}><form onSubmit={saveSchedule} className="shift-form">
       <label>Cashier<select required disabled={Boolean(schedule._id)} value={schedule.cashier} onChange={e => setSchedule({ ...schedule, cashier: e.target.value })}><option value="">Select cashier</option>{cashiers.map(c => <option key={c._id} value={c._id}>{c.name} ({c.username})</option>)}</select></label>
       <label>Shift Number<input required min="1" type="number" value={schedule.shiftNumber} onChange={e => setSchedule({ ...schedule, shiftNumber: e.target.value })} /></label>
-      <label>Start Time<input required type="datetime-local" value={schedule.startTime} onChange={e => setSchedule({ ...schedule, startTime: e.target.value })} /></label>
-      <label>End Time<input required type="datetime-local" value={schedule.endTime} onChange={e => setSchedule({ ...schedule, endTime: e.target.value })} /></label>
+      <label>Start Date<input required type="date" value={schedule.startDate} onChange={e => setSchedule({ ...schedule, startDate: e.target.value })} /></label>
+      <label>Start Time<input required type="time" value={schedule.startClock} onChange={e => setSchedule({ ...schedule, startClock: e.target.value })} /></label>
+      <label>End Date<input required type="date" value={schedule.endDate} onChange={e => setSchedule({ ...schedule, endDate: e.target.value })} /></label>
+      <label>End Time<input required type="time" value={schedule.endClock} onChange={e => setSchedule({ ...schedule, endClock: e.target.value })} /></label>
+      <p className="shift-hint">For an overnight shift (e.g. 10:00 PM – 6:00 AM), set End Date to the next calendar day.</p>
       <label>Notes<textarea value={schedule.notes} onChange={e => setSchedule({ ...schedule, notes: e.target.value })} /></label>
       <button className="shift-primary">{schedule._id ? 'Save Changes' : 'Schedule Shift'}</button>
     </form></Modal>}
