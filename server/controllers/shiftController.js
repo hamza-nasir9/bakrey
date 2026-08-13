@@ -1,5 +1,6 @@
 import mongoose from 'mongoose'
-import { ActivityLog, Attendance, Order, Payment, Purchase, Shift, User } from '../models/BusinessModels.js'
+import { ActivityLog, Attendance, Order, Payment, Purchase, Shift } from '../models/BusinessModels.js'
+import User from '../models/User.js'
 import { activeShift, calculateShift, isWithinWindow, overlappingSchedule, upcomingShift } from '../services/shiftService.js'
 const id = x => mongoose.isValidObjectId(x)
 const num = x => Number(x)
