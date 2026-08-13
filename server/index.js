@@ -25,7 +25,7 @@ dotenv.config()
 const app = express()
 const allowedOrigins = process.env.CLIENT_URL?.split(',').map(origin => origin.trim()).filter(Boolean) || ['http://localhost:5173']
 app.use(helmet())
-app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes(origin)) return callback(null, true); return callback(new Error('Origin is not allowed by CORS.')) }, methods: ['GET', 'POST', 'PATCH', 'DELETE'] }))
+app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes(origin)) return callback(null, true); return callback(new Error('Origin is not allowed by CORS.')) }, methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'] }))
 app.use(express.json({ limit: '1mb' }))
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false }), authRoutes)
 app.use('/api/dashboard', dashboardRoutes)

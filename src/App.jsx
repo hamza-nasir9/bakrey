@@ -48,11 +48,7 @@ function Login({ signedIn }) {
 
       signedIn(data.user);
 
-      if (data.user.role === 'ADMIN') {
-        navigate('/dashboard');
-      } else {
-        navigate('/shifts');
-      }
+      navigate('/dashboard');
     } catch (err) {
       setError(
         err.response?.data?.message ||
@@ -64,8 +60,6 @@ function Login({ signedIn }) {
     }
   };
 
-  // Yahan se tumhara existing JSX return waise hi rahega.
-}
   return <div className="auth-page"><section className="auth-side"><div className="auth-brand"><div className="logo">AK</div><div><b>AL KAUSAR</b><span>BAKREY</span></div></div><div className="side-content"><p className="eyebrow">BUSINESS MANAGEMENT SYSTEM</p><h1>Built for every part<br />of your livestock business.</h1><p className="side-copy">Securely manage records, sales, cash collection, inventory and staff from one professional workspace.</p><div className="feature-list"><p><CheckCircle2 />Role-based access for Owner / Admin and Cashiers</p><p><CheckCircle2 />Secure sessions and protected business records</p><p><CheckCircle2 />Four fixed cashier shifts with individual access</p></div></div><footer>© 2024 AL KAUSAR BAKREY · Business Management System</footer></section><section className="login-panel"><div className="login-box"><div className="mobile-brand"><div className="logo">AK</div><b>AL KAUSAR BAKREY</b></div><p className="eyebrow">SECURE ACCESS</p><h2>Welcome back</h2><p className="sub">Sign in to access your business workspace.</p><div className="role-switch"><button className={mode === 'admin' ? 'selected' : ''} onClick={() => { setMode('admin'); setError(''); setSecret('') }}><ShieldCheck />Owner / Admin</button><button className={mode === 'cashier' ? 'selected' : ''} onClick={() => { setMode('cashier'); setError(''); setSecret('') }}><UserRound />Cashier</button></div><form onSubmit={submit}><label>Username<div className="input"><UserRound /><input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" placeholder={mode === 'admin' ? 'Enter your username' : 'Enter cashier username'} required /></div></label><label>{mode === 'admin' ? 'Password' : 'Numeric PIN'}<div className="input"><KeyRound />
     <input
       value={secret}

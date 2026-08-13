@@ -1,6 +1,8 @@
 import { ActivityLog, Employee, Expense, InventoryItem, Order, Payment, Purchase, Salary, Supplier } from '../models/BusinessModels.js'
+import { activeShift, calculateShift, isWithinWindow } from './shiftService.js'
 const amount = (rows, field = 'amount') => rows[0]?.total || 0
 const startOfDay = date => { const result = new Date(date); result.setHours(0,0,0,0); return result }
+const endOfDay = date => { const result = new Date(date); result.setHours(23,59,59,999); return result }
 const range = days => ({ $gte: startOfDay(new Date(Date.now() - (days - 1) * 86400000)), $lte: new Date() })
 const totals = model => model.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
 const dateTotals = (model, dateField, valueField, days) => model.aggregate([{ $match: { [dateField]: range(days) } }, { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: `$${dateField}` } }, total: { $sum: `$${valueField}` } } }, { $sort: { _id: 1 } }])
@@ -12,5 +14,52 @@ export async function getDashboardData(period = 'daily') {
   ])
   const revenue = amount(revenueRows), expenses = amount(expenseRows), purchases = amount(purchaseRows,'total'), salaries = amount(salaryRows,'total'), pendingPayments = amount(pendingRows,'total')
   const revenueSeries = series(revenueChartRows, days), expenseSeries = series(expenseChartRows, days); const expensesByDate = new Map(expenseSeries.map(x=>[x.date,x.value])); const profitSeries = revenueSeries.map(x=>({...x,value:x.value-(expensesByDate.get(x.date)||0)}))
-  return { period, cards:{ totalSales:amount(salesRows), totalRevenue:revenue, totalExpenses:expenses, totalPurchase:purchases, totalSalary:salaries, netProfit:revenue-purchases-salaries-expenses, pendingPayments, totalOrders, completedOrders, pendingOrders, totalEmployees:employees, totalSuppliers:suppliers, currentInventory:amount(inventory,'total'), lowStockItems:lowStock }, charts:{ revenue:revenueSeries, expenses:expenseSeries, profit:profitSeries, orders:await dateTotals(Order,'bookingDate','totalAmount',days).then(r=>series(r,days)) }, recentActivities:recentActivities.map(item=>({ id:item._id, module:item.module, action:item.action, description:item.description, amount:item.amount || 0, actor:item.actor?.name || 'System', occurredAt:item.occurredAt })) }
+  return { role:'ADMIN', period, cards:{ totalSales:amount(salesRows), totalRevenue:revenue, totalExpenses:expenses, totalPurchase:purchases, totalSalary:salaries, netProfit:revenue-purchases-salaries-expenses, pendingPayments, totalOrders, completedOrders, pendingOrders, totalEmployees:employees, totalSuppliers:suppliers, currentInventory:amount(inventory,'total'), lowStockItems:lowStock }, charts:{ revenue:revenueSeries, expenses:expenseSeries, profit:profitSeries, orders:await dateTotals(Order,'bookingDate','totalAmount',days).then(r=>series(r,days)) }, recentActivities:recentActivities.map(item=>({ id:item._id, module:item.module, action:item.action, description:item.description, amount:item.amount || 0, actor:item.actor?.name || 'System', occurredAt:item.occurredAt })) }
+}
+
+// Cashier-scoped dashboard: only the cashier's own operational data for today.
+// Deliberately excludes company profit, expenses, salaries, and any other
+// owner-level financial totals — those live only in getDashboardData (ADMIN).
+export async function getCashierDashboardData(cashierId) {
+  const today = { $gte: startOfDay(new Date()), $lte: endOfDay(new Date()) }
+  const [shift, todayOrders, todayOrderValueRows, todayCollectionRows, pendingOrders, lowStockItems, recentActivities] = await Promise.all([
+    activeShift(cashierId),
+    Order.countDocuments({ createdBy: cashierId, bookingDate: today, status: { $ne: 'Cancelled' } }),
+    Order.aggregate([{ $match: { createdBy: cashierId, bookingDate: today, status: { $ne: 'Cancelled' } } }, { $group: { _id: null, total: { $sum: '$totalAmount' } } }]),
+    Payment.aggregate([{ $match: { receivedBy: cashierId, date: today, isVoided: false } }, { $group: { _id: null, total: { $sum: { $cond: [{ $eq: ['$paymentType', 'Refund'] }, { $multiply: ['$amount', -1] }, '$amount'] } } } }]),
+    Order.countDocuments({ createdBy: cashierId, status: 'Pending' }),
+    InventoryItem.countDocuments({ $expr: { $lte: ['$quantity', '$lowStockThreshold'] }, isActive: true }),
+    ActivityLog.find({ actor: cashierId }).sort({ occurredAt: -1 }).limit(8).lean(),
+  ])
+  const shiftLive = shift ? await calculateShift(shift) : null
+  return {
+    role: 'CASHIER',
+    shift: shift ? {
+      id: shift._id,
+      shiftId: shift.shiftId,
+      shiftNumber: shift.shiftNumber,
+      status: shift.status,
+      startedAt: shift.shiftStartTime,
+      openingCash: shift.openingCash,
+      totalOrders: shiftLive.totalOrders,
+      cashCollected: shiftLive.systemCashCollection,
+      expectedCash: shiftLive.expectedCash,
+      windowClosed: !isWithinWindow(shift),
+    } : null,
+    cards: {
+      todayOrders,
+      todayOrdersValue: amount(todayOrderValueRows),
+      todayCollections: amount(todayCollectionRows),
+      pendingOrders,
+      lowStockItems,
+    },
+    recentActivities: recentActivities.map(item => ({
+      id: item._id,
+      module: item.module,
+      action: item.action,
+      description: item.description,
+      amount: item.amount || 0,
+      occurredAt: item.occurredAt,
+    })),
+  }
 }
